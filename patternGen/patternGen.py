@@ -324,17 +324,21 @@ class PatternGen(object):
 		"""
 		soup = get_soup(self.path, file)
 		name_check(file, soup.TFO['name'])
+		self.test_path = soup.TEST['path']
 		self.file_list['LBF'] = soup.TFO.LBF['type'] + '.lbf'
 		test_tag = soup.find('TEST')
 		self.project_name = test_tag['name']
-		self.file_list['PTN'] = test_tag['name'] + '.ptn'
+		self.file_list['PTN'] = os.path.join(self.test_path, test_tag['name'] + '.ptn')
 		# self.path = test_tag['path']
 		for child in test_tag.children:
 			if type(child) == bs4.element.Tag:
 				if child.name == 'DWM' or child.name == 'BIT':
-					self.file_list[child.name] = child['name']
+					self.file_list[child.name] = os.path.join(self.test_path, child['name'])
 				else:
-					self.file_list[child.name] = child['name'] + '.' + child.name.lower()
+					self.file_list[child.name] = os.path.join(self.test_path, child['name'] + '.' + child.name.lower())
+		# for tag, name in self.file_list.items():
+		# 	self.file_list[tag] = os.path.join(test_path, name)
+		# print(self.file_list)
 
 	def itm_parser(self, file):
 		soup = get_soup(self.path, file)
@@ -344,10 +348,10 @@ class PatternGen(object):
 		if period_tag:
 			self.digital_param['period'] = period_tag[0].get('period', '1u')
 		multiple_tag = soup.select('DIGITAL > CYCLE[multiple]')
-		print(multiple_tag)
+		# print(multiple_tag)
 		if multiple_tag:
 			self.digital_param['multiple'] = int(multiple_tag[0].get('multiple', '1'))
-			print(self.digital_param['multiple'])
+			# print(self.digital_param['multiple'])
 
 	@staticmethod
 	def pio_parser(path, file):
@@ -586,7 +590,7 @@ class PatternGen(object):
 			write_length(fw, tb_counter)
 			vcd_list.append(tb_counter)
 			self.trf_param['vcd_list'] = vcd_list
-			self.trf_param['vcd_len'] = tick * self.digital_param['multiple'] + 2 * (len(vcd_list) - 1)
+			self.trf_param['vcd_len'] = tick * self.digital_param['multiple'] + 3 * (len(vcd_list) - 1)
 			# self.trf_param['vcd_len'] = tick + 2 * (len(vcd_list) - 1) # Warning
 
 	def sbc_parser(self, file):
@@ -718,6 +722,143 @@ class PatternGen(object):
 		return val + ' '
 
 	def trf2vcd(self, trf, vcd, flag=None):
+		def operation():
+			fv.write('#{}\n'.format(order))
+			last_line_tuple = struct.unpack('>' + 'B' * 16, last_line)
+			diff = map(find_diff, line_tuple, last_line_tuple)  # Return a list of dictionary.
+			for i, byte_dict in enumerate(diff):
+				for bit, val in byte_dict.items():
+					pos = (i + 1, bit)
+					sig = pos2sig.setdefault(pos, 0)  # Signal name, string.
+					if sig == 0:
+						continue
+					elif sig in sig2sym:  # Normal signal or distributed bus signal.
+						sym2val[sig2sym[sig]] = val
+					else:  # Concentrated bus signal
+						for key in sig2sym:
+							if type(key) is tuple and re.sub(r'\[\d+\]', '', sig) in key:
+								sym2val[sig2sym[key]] = self.get_bus_val(line_tuple, key)
+								break
+			for sym, val in sym2val.items():
+				fv.write('{}{}\n'.format(val, sym))
+
+		def get_vcd_list(vcd_list):
+			# print(vcd_list)
+			for item in vcd_list[:-1]:
+				# print(item)
+				yield item
+			yield vcd_list[-1] + 2
+
+		tick = 0
+		order = 0
+		line_cnt = 1
+		block_cnt = 0
+		threshold = 2047
+		write_cnt = 0
+		# print('self.path=', self.path)
+		path_trf = os.path.join(self.path, trf)
+		path_vcd = os.path.join(self.path, vcd)
+		pos2sig = {v: k for k, v in self.sig2pos.items()}
+		sig2sym = {v: k for k, v in self.sym2sig.items()}
+		sorted_sym2sig_key = sorted(self.sym2sig)
+		sorted_sym2sig = list(map(lambda x: (x, self.sym2sig[x]), sorted_sym2sig_key))
+		title = {
+			'date': time.asctime(time.localtime(time.time())),
+			'version': 'ModelSim Version 10.1c',
+			'timescale': '1us'
+		}
+		# Prepare param for trf abandon
+		if flag == 'bypass':   # load length of vcd and bs from json file
+			print('Load temp file')
+			self.load_temp()
+		next_cnt_gen = get_vcd_list(self.trf_param['vcd_list'])
+		next_cnt = next_cnt_gen.__next__()
+		vcd_len = self.trf_param['vcd_len']
+		bs_len = self.trf_param['bs_len']
+		vcd_list = self.trf_param['vcd_list']
+		x1 = 2048 - (bs_len + 3) % 2048 - 3
+		if vcd_len <= 2048:
+			end_tick = vcd_len + 1
+		else:
+			end_tick = 2049 + vcd_len - x1
+		with open(path_trf, 'rb') as ft, open(path_vcd, 'w') as fv:  # , open(path_pruned_trf, 'wb') as fp:
+			for item in title:
+				fv.write('${}\n\t{}\n$end\n'.format(item, title[item]))
+			fv.write('$scope module {}_tb $end\n'.format(self.project_name))
+			# Signal definition. Copy the original vcd file.
+			# for symbol, signal in self.sym2sig.items():
+			# print(sorted_sym2sig)
+			for symbol, signal in sorted_sym2sig:
+				# print(symbol, signal)
+				if isinstance(signal, tuple):
+					# io = self.sig2pio['{}[{}]'.format(signal[0], signal[1])] == 'input' and 'reg' or 'wire'
+					io = 'wire'
+					signal, width = '{}[{}:{}]'.format(signal[0], signal[1], signal[2]), abs(signal[1] - signal[2] + 1)
+				else:
+					width = 1
+					# io = self.sig2pio[signal] == 'input' and 'reg' or 'wire'
+					io = 'wire'
+				fv.write('$var {} {} {} {} $end\n'.format(io, width, symbol, signal))
+			fv.write('$upscope $end\n$enddefinitions $end\n')
+			# ft.seek(0, BIN_BYTE_WIDTH * 2)  # ignore first 2 lines
+			line = ft.read(BIN_BYTE_WIDTH)  # get BIN_BYTE_WIDTH bytes
+			last_line = None
+			while line:
+				if tick > end_tick:
+					fv.write('#{}'.format(order))
+					break
+				elif block_cnt <= threshold and next_cnt > 0:
+					if 1 < tick < x1 or tick >= 2048:
+						write_cnt += 1
+						next_cnt -= 1
+						sym2val = {}
+						line_tuple = struct.unpack('>' + 'B' * 16, line)
+						if not last_line:  # first line
+							fv.write('#{}\n$dumpvars\n'.format(order))
+							for sym, sig in self.sym2sig.items():
+								if isinstance(sig, tuple):
+									sym2val[sym] = self.get_bus_val(line_tuple, sig)
+								else:
+									pos = self.sig2pos.get(sig)
+									if pos:
+										sym2val[sym] = (line_tuple[pos[0] - 1] >> pos[1]) & 1
+							for sym, val in sym2val.items():  # Write all symbol + value together.
+								fv.write('{}{}\n'.format(val, sym))
+							fv.write('$end\n')
+						elif line != last_line:  # find difference, write
+							operation()
+						last_line = line
+						order += 1
+					# tick += 1
+					# print(write_cnt)
+				elif next_cnt <= 0:  # tri-en signal change
+					next_cnt = next_cnt_gen.__next__()
+					ignore_line = ft.read(BIN_BYTE_WIDTH)
+					print('line = ', line_cnt)
+					print(ignore_line)
+					block_cnt += 1
+					line_cnt += 1
+					tick += 1
+					# print(next_cnt)
+					threshold -= 1  # ignore 1 line in the end of a block
+					# print(threshold)
+					# end_tick += 3
+				elif block_cnt > threshold:
+					print('line = ', line_cnt)
+					print(threshold)
+					print(block_cnt)
+					print('ignore 1 line')
+					print(line)
+				block_cnt += 1  # block counter always change
+				if block_cnt > 2047:
+					block_cnt = 0
+					threshold = 2047  # reset threshold
+				line = ft.read(BIN_BYTE_WIDTH)
+				line_cnt += 1
+				tick += 1
+				# print(tick)
+
+	def trf2vcd_no_tri(self, trf, vcd, flag=None):
 		tick = 0
 		order = 0
 		path_trf = os.path.join(self.path, trf)
@@ -812,102 +953,6 @@ class PatternGen(object):
 					order += 1
 				line = ft.read(BIN_BYTE_WIDTH)
 				tick += 1
-	# def trf2vcd(self, trf, vcd, flag=None):
-	# 	tick = 0
-	# 	order = 0
-	# 	path_trf = os.path.join(self.path, trf)
-	# 	path_pruned_trf = os.path.join(self.path, 'pruned_' + trf)
-	# 	path_vcd = os.path.join(self.path, vcd)
-	# 	pos2sig = {v: k for k, v in self.sig2pos.items()}
-	# 	sig2sym = {v: k for k, v in self.sym2sig.items()}
-	# 	# print(sig2sym)
-	# 	sorted_sym2sig_key = sorted(self.sym2sig)
-	# 	sorted_sym2sig = list(map(lambda x: (x, self.sym2sig[x]), sorted_sym2sig_key))
-	# 	sorted_exp_sym2sig = expand_bus(sorted_sym2sig)  # for simple vcd2pic (expand bus)
-	# 	title = {
-	# 		'date': time.asctime(time.localtime(time.time())),
-	# 		'version': 'ModelSim Version 10.1c',
-	# 		'timescale': '1us'
-	# 	}
-	# 	# Prepare param for trf abandon
-	# 	if flag == 'bypass':   # load length of vcd and bs from json file
-	# 		print('Load temp file')
-	# 		self.load_temp()
-	# 	vcd_len = self.trf_param['vcd_len']
-	# 	bs_len = self.trf_param['bs_len']
-	# 	x1 = 2048 - (bs_len + 3) % 2048 - 3
-	# 	if vcd_len <= 2048:
-	# 		end_tick = vcd_len + 1
-	# 	else:
-	# 		end_tick = 2049 + vcd_len - x1
-	#
-	# 	with open(path_trf, 'rb') as ft, open(path_vcd, 'w') as fv:  # , open(path_pruned_trf, 'wb') as fp:
-	# 		for item in title:
-	# 			fv.write('${}\n\t{}\n$end\n'.format(item, title[item]))
-	# 		fv.write('$scope module {}_tb $end\n'.format(self.project_name))
-	# 		# Signal definition. Copy the original vcd file.
-	# 		# for symbol, signal in self.sym2sig.items():
-	# 		# print(sorted_sym2sig)
-	# 		for symbol, signal in sorted_sym2sig:
-	# 			# print(symbol, signal)
-	# 			if isinstance(signal, tuple):
-	# 				# io = self.sig2pio['{}[{}]'.format(signal[0], signal[1])] == 'input' and 'reg' or 'wire'
-	# 				io = 'wire'
-	# 				signal, width = '{}[{}:{}]'.format(signal[0], signal[1], signal[2]), abs(signal[1] - signal[2] + 1)
-	# 			else:
-	# 				width = 1
-	# 				# io = self.sig2pio[signal] == 'input' and 'reg' or 'wire'
-	# 				io = 'wire'
-	# 			fv.write('$var {} {} {} {} $end\n'.format(io, width, symbol, signal))
-	# 		fv.write('$upscope $end\n$enddefinitions $end\n')
-	# 		line = ft.read(BIN_BYTE_WIDTH)  # Bytes type
-	# 		last_line = None
-	# 		while line:
-	# 			if tick > end_tick:
-	# 				fv.write('#{}'.format(order))
-	# 				break
-	# 			elif 1 < tick < x1 or tick >= 2048:
-	# 				sym2val = {}
-	# 				line_tuple = struct.unpack('>' + 'B' * 16, line)
-	# 				# fp.write(line)  # generate pruned TRF file
-	# 				if not last_line:  # first line
-	# 					fv.write('#{}\n$dumpvars\n'.format(order))
-	# 					for sym, sig in self.sym2sig.items():
-	# 						if isinstance(sig, tuple):
-	# 							sym2val[sym] = self.get_bus_val(line_tuple, sig)
-	# 						else:
-	# 							pos = self.sig2pos.get(sig)
-	# 							if pos:
-	# 								sym2val[sym] = (line_tuple[pos[0] - 1] >> pos[1]) & 1
-	# 					for sym, val in sym2val.items():  # Write all symbol + value together.
-	# 						fv.write('{}{}\n'.format(val, sym))
-	# 					fv.write('$end\n')
-	# 				elif line != last_line:
-	# 					fv.write('#{}\n'.format(order))
-	# 					last_line_tuple = struct.unpack('>' + 'B' * 16, last_line)
-	# 					diff = map(find_diff, line_tuple, last_line_tuple)  # Return a list of dictionary.
-	# 					for i, byte_dict in enumerate(diff):
-	# 						for bit, val in byte_dict.items():
-	# 							pos = (i + 1, bit)
-	# 							sig = pos2sig.setdefault(pos, 0)  # Signal name, string.
-	# 							if sig == 0:
-	# 								continue
-	# 							elif sig in sig2sym:  # Normal signal or distributed bus signal.
-	# 								sym2val[sig2sym[sig]] = val
-	# 								# print('single')
-	# 							else:  # Concentrated bus signal
-	# 								for key in sig2sym:
-	# 									if type(key) is tuple and re.sub(r'\[\d+\]', '', sig) in key:
-	# 										# print(sig)
-	# 										sym2val[sig2sym[key]] = self.get_bus_val(line_tuple, key)
-	# 										break
-	# 					for sym, val in sym2val.items():
-	# 						fv.write('{}{}\n'.format(val, sym))
-	# 				last_line = line
-	# 				order += 1
-	# 			line = ft.read(BIN_BYTE_WIDTH)
-	# 			tick += 1
-	# 	# print(sorted_sym2sig)
 
 	def compare_trf(self, ptn, trf):
 		# compare trf and ptn file, generate report.
@@ -1050,7 +1095,7 @@ class PatternGen(object):
 		print('Nop complete')
 
 	def write_testbench(self, fw):
-		self.total_length -= 1  # the first line will add an extra 1
+		# self.total_length -= 1  # the first line will add an extra 1
 		if 'normal' in self.config['command']:
 			self.vcd_parser(fw)
 		elif 'legacy' in self.config['command']:
@@ -1091,6 +1136,7 @@ class PatternGen(object):
 	# def time_record(self, s_time):
 
 	def save_temp(self):
+		# path = os.path.join(self.path, self.test_path, "temp.json")
 		path = os.path.join(self.path, "temp.json")
 		with open(path, "w+") as f:
 			json.dump(self.trf_param, f)
@@ -1100,6 +1146,7 @@ class PatternGen(object):
 		# ft.close()
 
 	def load_temp(self):
+		# path = os.path.join(self.path, self.test_path, "temp.json")
 		path = os.path.join(self.path, "temp.json")
 		with open(path, "r") as f:
 			self.trf_param = json.load(f)
@@ -1128,7 +1175,7 @@ def test():
 	# pattern = PatternGen('CLK', 'tfo_demo.tfo', '-legacy')  # Test txt(vcd) format.
 	# pattern = PatternGen('LX200', 'mul1.tfo', '-legacy')  # Test bus.
 	# pattern = PatternGen('stage1_horizontal_double_0', 'tfo_demo.tfo', '-legacy')  # Test bus.
-	pattern = PatternGen('test_tri', 'test_tri.tfo')  # Test trigate bus.
+	pattern = PatternGen('wrrd_4k_0507', 'wrrd.tfo')  # Test trigate bus.
 	# pattern = PatternGen('counter', 'tfo_demo.tfo')  # type: PatternGen
 	# pattern = PatternGen('test_tri_pro', 'tfo_demo.tfo')  # Test trigate bus.
 	# pattern = PatternGen('mul5', 'tfo_demo.tfo')
@@ -1138,13 +1185,13 @@ def test():
 	# pattern = PatternGen('eras', 'FLASH.tfo')
 	# pattern = PatternGen('ram1', 'tfo_demo.tfo')
 
-	pattern.write()
+	# pattern.write()
 	# print(pattern.sym2sig)
 	# print(pattern.cmd2spio)
 	# pattern.save_temp()
 	# pattern.load_temp()
 	# print(pattern.sym2sig)
-	# pattern.trf2vcd('pin_test.trf', 'p4.vcd', flag='bypass')
+	pattern.trf2vcd('wrrd/wrrd.trf', 'wrrd3.vcd', flag='bypass')
 	# pattern.trf2vcd('counter.trf', 'c3.vcd', flag='bypass')
 	# pattern.trf2vcd('ram1.trf', 'test4.vcd', flag='bypass')
 	# pattern.trf2vcd('m8.trf', 'm11.vcd', flag='bypass')

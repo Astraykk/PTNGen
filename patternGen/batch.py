@@ -246,8 +246,8 @@ like 01, 12, or 012)
 
 
 def test():
-	# batch_trf2vcd('tfo', 'DSP_4.tfo')
-	batch_merge('tfo', 'DSP_4.tfo')
+	batch_trf2vcd('wrrd_4k_0507', 'wrrd.tfo')
+	batch_merge('wrrd_4k_0507', 'wrrd.tfo')
 	# batch_merge('.', 'bugs2.tfo')
 	# batch_trf2vcd('tfo', 'chen.tfo')
 
