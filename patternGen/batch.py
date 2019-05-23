@@ -237,8 +237,21 @@ def batch_merge(path, tfo):
 	print("\nTotal time: " + str(end_time - start_time))
 
 
+def batch_vcd2wlf(path, tfo, vcd_type):
+	file_list_list = tfo_parser(path, tfo)
+	for project_path, file_list in file_list_list:
+		pattern = PatternGen(project_path, file_list=file_list)
+		if vcd_type == 'trf' or vcd_type == 'merge':
+			vcd_file_name = '{}_{}.vcd'.format(pattern.project_name, vcd_type)
+		else:
+			vcd_file_name = '{}.vcd'.format(pattern.project_name)
+		vcd = os.path.join(project_path, vcd_file_name)
+		wlf = os.path.join(project_path, os.path.splitext(vcd_file_name)[0] + '.wlf')
+		os.popen("vcd2wlf {} {}".format(vcd, wlf))
+
+
 string = """
-Choose operation: build(0), test(1), trf2vcd(2), merge(3):
+Choose operation: build(0), test(1), trf2vcd(2), merge(3), vcd2wlf(4):
 (If you want execute multiple operations in a row, input the corresponding digits
 like 01, 12, or 012)
 (Enter to quit)
@@ -266,6 +279,9 @@ if __name__ == "__main__":
 		path = input()
 		print('Input tfo file name')
 		tfo = input()
+		if '4' in mode:
+			print('Input vcd type(origin, trf, merge)')
+			vcd_type = input()
 		for item in list(mode):
 			if item == 'build' or item == '0':
 				batch_build(path, tfo)
@@ -276,3 +292,5 @@ if __name__ == "__main__":
 				batch_trf2vcd(path, tfo)
 			elif item == 'merge' or item == '3':
 				batch_merge(path, tfo)
+			elif item == 'vcd2wlf' or item == '4':
+				batch_vcd2wlf(path, tfo, vcd_type)

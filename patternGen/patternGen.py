@@ -667,7 +667,7 @@ class PatternGen(object):
 			regex2 = re.compile(r'^\*{10}')
 		else:
 			path = os.path.join(self.path, self.file_list['VCD'])
-			regex1 = re.compile(r'\$var\s+\w+\s+\d+\s+(.)\s+(\w+)\s*(\[(\d+)(:?)(\d*)\])?\s+\$end', re.I)
+			regex1 = re.compile(r'\$var\s+\w+\s+\d+\s+(.{1,2})\s+(\w+)\s*(\[(\d+)(:?)(\d*)\])?\s+\$end', re.I)
 			regex2 = re.compile(r'\$enddefinitions \$end')
 		regex3 = re.compile(r'\$timescale')
 		with open(path, "r") as f:
@@ -1175,23 +1175,25 @@ def test():
 	# pattern = PatternGen('CLK', 'tfo_demo.tfo', '-legacy')  # Test txt(vcd) format.
 	# pattern = PatternGen('LX200', 'mul1.tfo', '-legacy')  # Test bus.
 	# pattern = PatternGen('stage1_horizontal_double_0', 'tfo_demo.tfo', '-legacy')  # Test bus.
-	pattern = PatternGen('wrrd_4k_0507', 'wrrd.tfo')  # Test trigate bus.
+	# pattern = PatternGen('wrrd_4k_0507', 'wrrd.tfo')  # Test trigate bus.
 	# pattern = PatternGen('counter', 'tfo_demo.tfo')  # type: PatternGen
 	# pattern = PatternGen('test_tri_pro', 'tfo_demo.tfo')  # Test trigate bus.
-	# pattern = PatternGen('mul5', 'tfo_demo.tfo')
+	pattern = PatternGen('bugs', 'tfo_demo.tfo')
 	# pattern = PatternGen('mul1', 'tfo_demo.tfo')
 	# pattern = PatternGen('and_xor_1', 'tfo_demo.tfo')
 	# pattern = PatternGen('f8_mux', 'tfo_demo.tfo')
 	# pattern = PatternGen('eras', 'FLASH.tfo')
 	# pattern = PatternGen('ram1', 'tfo_demo.tfo')
 
-	# pattern.write()
+	pattern.write()
+	print(pattern.sym2sig)
+	print('!!' in pattern.sym2sig)
 	# print(pattern.sym2sig)
 	# print(pattern.cmd2spio)
 	# pattern.save_temp()
 	# pattern.load_temp()
 	# print(pattern.sym2sig)
-	pattern.trf2vcd('wrrd/wrrd.trf', 'wrrd3.vcd', flag='bypass')
+	# pattern.trf2vcd('wrrd/wrrd.trf', 'wrrd3.vcd', flag='bypass')
 	# pattern.trf2vcd('counter.trf', 'c3.vcd', flag='bypass')
 	# pattern.trf2vcd('ram1.trf', 'test4.vcd', flag='bypass')
 	# pattern.trf2vcd('m8.trf', 'm11.vcd', flag='bypass')
