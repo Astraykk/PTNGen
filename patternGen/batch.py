@@ -206,6 +206,7 @@ def batch_trf2vcd(path, tfo):
 
 def batch_merge(path, tfo):
 	print('Start batch merge')
+	fail_list = []
 	file_list_list = tfo_parser(path, tfo)
 	# print(file_list_list)
 	start_time = time.time()
@@ -222,7 +223,9 @@ def batch_merge(path, tfo):
 			vcd1 = os.path.join(project_path, pattern.file_list['VCD'])
 			vcd2 = os.path.join(project_path, pattern.project_name + '_trf.vcd')
 			vcdm_path = os.path.join(project_path, pattern.project_name + '_merge.vcd')
-			vcd_merge(vcd1, vcd2, period1, period2, vcdm_path, flag='alternate')
+			test_pass = vcd_merge(vcd1, vcd2, period1, period2, vcdm_path, flag='alternate')
+			if test_pass == 0:
+				fail_list.append(pattern.project_name)
 			# vcd_merge(vcd1, vcd2, period1, period2, vcdm_path)
 			e_time = time.time()
 			key = 'Merge time for {:<30}:'.format(pattern.project_name)
@@ -234,6 +237,10 @@ def batch_merge(path, tfo):
 	print('Batch merge finished')
 	end_time = time.time()
 	report(report_file, 'Total merge time:', end_time - start_time)
+	if fail_list:
+		report(report_file, 'Test failed in:', ", ".join(str(i) for i in fail_list))
+	else:
+		report(report_file, 'All tests pass!')
 	print("\nTotal time: " + str(end_time - start_time))
 
 
@@ -259,8 +266,10 @@ like 01, 12, or 012)
 
 
 def test():
-	batch_trf2vcd('wrrd_4k_0507', 'wrrd.tfo')
-	batch_merge('wrrd_4k_0507', 'wrrd.tfo')
+	# batch_trf2vcd('.', 'chenwenwei_run20190309.tfo')
+	batch_merge('tfo', 'DSP_4.tfo')
+	# batch_trf2vcd('wrrd_4k_0507', 'wrrd.tfo')
+	# batch_merge('wrrd_4k_0507', 'wrrd.tfo')
 	# batch_merge('.', 'bugs2.tfo')
 	# batch_trf2vcd('tfo', 'chen.tfo')
 

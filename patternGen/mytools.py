@@ -141,27 +141,13 @@ class VcdFile(object):
 					if key not in self.sym2sig:
 						# print(key + ' key not exist')
 						continue
-					if isinstance(self.sym2sig[key], tuple):
-						bus_ele = self.sym2sig[key]
-						bus_width = bus_ele[1] - bus_ele[2]
-						# print("{} {}".format(bus_width, bus_ele))
-						# bus_signal = bus_width > 0 and 1 or -1
+					# if isinstance(self.sym2sig[key], tuple):
+					# 	bus_ele = self.sym2sig[key]
+					# 	bus_width = bus_ele[1] - bus_ele[2]
+					# 	value = base + '0' * (abs(bus_width) + 1 - len(value)) + value  # Fill 0 on the left
+					if self.vcd_info[i]['width'] > 1:  # WARNING: how to identify a bus?
+						bus_width = self.vcd_info[i]['width']
 						value = base + '0' * (abs(bus_width) + 1 - len(value)) + value  # Fill 0 on the left
-						# for i in range(0, bus_width + bus_signal, bus_signal):
-						# 	bus_sig = '{}[{}]'.format(bus_ele[0], str(bus_ele[1] - i))
-						# 	# print("tick={} {} {}".format(tick, bus_sig, self.sig2pos))
-						# 	# print("i={}, value={}".format(i, value))
-						# 	pos2val[self.sig2pos.setdefault(bus_sig, None)] = value[abs(i)]
-					# print('ok')
-					# print('signal = %s, value = %s' % (bus_sig, value[abs(i)]))
-					# else:
-					# 	if value == 'x':
-					# 		value = x_val
-					# 	if value == 'z':
-					# 		value = z_val
-					# 	pos2val[self.sig2pos.setdefault(self.sym2sig[key], None)] = value
-					# print(i)
-					# print(i, len(self.vcd_info))
 					if vcd_tick + 1 == len(self.vcd_info[i]['wave_info']):
 						self.vcd_info[i]['wave_info'][-1] = value
 					else:
@@ -330,6 +316,7 @@ def _vcd_merge(vcd_ref, vcd_file, path='.', compare=True, flag='order'):
 	"""
 	Merge vcd files.
 	"""
+	test_pass = 0
 	time_cycle = vcd_ref.timescale
 	fr = open(os.path.splitext(path)[0] + '.rpt', 'w')
 	vcd_m = VcdFile(path, vcd_ref.period)
@@ -395,9 +382,11 @@ def _vcd_merge(vcd_ref, vcd_file, path='.', compare=True, flag='order'):
 		for i in range(len(vcd_file.vcd_info[0]['wave_info'])):  # tick
 			for j in range(len(vcd_file.vcd_info)):  # signal
 				ref_ord = vcd_ref.sym2ord[vcd_file.vcd_info[j]['symbol']]
+				# print(ref_ord)
 				x = vcd_ref.vcd_info[ref_ord]['wave_info'][i]
 				y = vcd_file.vcd_info[j]['wave_info'][i]
-				sig_ref = vcd_ref.vcd_info[j]['signal']
+				# print(vcd_ref.vcd_info[ref_ord]['signal'], vcd_file.vcd_info[j]['signal'])
+				sig_ref = vcd_ref.vcd_info[ref_ord]['signal']
 				sig_act = vcd_file.vcd_info[j]['signal']
 				if x != 'x' and x != 'z' and x != y:
 					fr.write('Time #{}: {}_ref = {}, {} = {}\n'.format(i*time_cycle, sig_ref, x, sig_act, y))  # report
@@ -407,19 +396,25 @@ def _vcd_merge(vcd_ref, vcd_file, path='.', compare=True, flag='order'):
 		}
 		if '1' not in wave_info:
 			fr.write("Test pass!")
+			test_pass = 1
 		vcd_m.sym2sig[sym] = sig
 		vcd_m.vcd_info.insert(0, error_dict)
 	fr.close()
-	return vcd_m
+	return vcd_m, test_pass
 
 
 def vcd_merge(vcd1, vcd2='', period1='1us', period2='1us', path='.', compare=True, flag='order'):
 	vcd_ref = VcdFile(vcd1, period=period1)
 	vcd_ref.get_vcd_info()
+	# print([item['symbol'] for item in vcd_ref.vcd_info])
+	# print(vcd_ref.sym2ord)
 	vcd_file = VcdFile(vcd2, period=period2)
 	vcd_file.get_vcd_info()
-	vcd_merge = _vcd_merge(vcd_ref, vcd_file, path, compare, flag=flag)
-	vcd_merge.gen_vcd(path)
+	# print(vcd_file.sym2ord)
+	# print([item['symbol'] for item in vcd_file.vcd_info])
+	vcd_m, test_pass = _vcd_merge(vcd_ref, vcd_file, path, compare, flag=flag)
+	vcd_m.gen_vcd(path)
+	return test_pass
 
 
 if __name__ == "__main__":
